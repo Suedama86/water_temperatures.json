@@ -1,0 +1,93 @@
+import requests
+import json
+import os
+from datetime import datetime, timedelta
+from github import Github
+
+# GitHub configuration
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+REPO_NAME = Suedama86/water_temperatures.json
+FILE_PATH = temperatur.json
+
+# SMHI Oceanographic Observations API base URL
+API_BASE_URL = "https://opendata-download-ocobs.smhi.se/api"
+API_VERSION = "latest"
+PARAMETER = "5"  # 5 represents sea temperature (Havstemperatur)
+
+# List of station IDs for the beaches you're interested in
+STATION_IDS = {
+    "Getterön": "33008",  # Example station ID, replace with actual IDs
+    "Barnens strand": "33009",
+    "Apelviken": "33010",
+    "Skrea strand": "33011",
+    "Klitterviken": "33012",
+    "Olofsbo": "33013"
+}
+
+def fetch_water_temperatures():
+    locations = {}
+    end_time = datetime.now()
+    start_time = end_time - timedelta(hours=5)
+    
+    for beach, station_id in STATION_IDS.items():
+        url = f"{API_BASE_URL}/version/{API_VERSION}/parameter/{PARAMETER}/station/{station_id}/period/latest-day/data.json"
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            temperatures = []
+            for value in data.get('value', []):
+                value_time = datetime.fromisoformat(value['date'].replace('Z', '+00:00'))
+                if start_time <= value_time <= end_time:
+                    temperatures.append(round(value['value'], 1))
+            
+            # Ensure we have 5 temperature values
+            while len(temperatures) < 5:
+                temperatures.append(temperatures[-1] if temperatures else None)
+            
+            locations[beach] = temperatures[:5]
+        else:
+            print(f"Failed to fetch data for {beach}: Status code {response.status_code}")
+    
+    return locations
+
+def create_json_data(locations):
+    json_data = [
+        [
+            ["Beach", "09:00", "10:00", "11:00", "12:00", "13:00"]
+        ]
+    ]
+    
+    for location, temperatures in locations.items():
+        row = [location] + temperatures
+        json_data[0].append(row)
+    
+    return json_data
+
+def update_github_file(json_data):
+    g = Github(GITHUB_TOKEN)
+    repo = g.get_repo(REPO_NAME)
+    
+    try:
+        contents = repo.get_contents(FILE_PATH)
+        repo.update_file(
+            FILE_PATH,
+            f"Update water temperatures {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            json.dumps(json_data, indent=4),
+            contents.sha
+        )
+        print(f"File {FILE_PATH} updated successfully.")
+    except Exception as e:
+        repo.create_file(
+            FILE_PATH,
+            f"Create water temperatures file {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            json.dumps(json_data, indent=4)
+        )
+        print(f"File {FILE_PATH} created successfully.")
+
+def main():
+    locations = fetch_water_temperatures()
+    json_data = create_json_data(locations)
+    update_github_file(json_data)
+
+if __name__ == "__main__":
+    main()
